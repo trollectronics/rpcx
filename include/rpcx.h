@@ -2,8 +2,16 @@
 #define	RPCX_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 
+typedef struct RPCXInfo RPCXInfo;
 struct RPCXInfo {
+	int fd;
+	
+	int			bpp;
+	int			planes;
+	bool		valid;
+	
 	uint8_t		palette[256*3];
 	int		colors;
 
@@ -13,8 +21,8 @@ struct RPCXInfo {
 	unsigned char	*data;
 };
 
-int rpcx_init(const char *fname, struct RPCXInfo *ri);
-int rpcx_read(struct RPCXInfo *ri);
-void rpcx_close();
+RPCXInfo *rpcx_init(const char *fname);
+int rpcx_read(RPCXInfo *ri);
+int rpcx_close(RPCXInfo *ri)
 
 #endif

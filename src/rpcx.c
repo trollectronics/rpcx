@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2018 Steven Arnow <s@rdw.se>
+Adapted for trollbook 2018 by Axel Isaksson <h4xxel>
 'rpcx.c' - This file is part of rPCX 
 
 This software is provided 'as-is', without any express or implied
@@ -24,74 +25,73 @@ freely, subject to the following restrictions:
 
 #define LE_TO_WORD(arr, idx) (((arr)[(idx)]) | (((arr)[(idx)+1]) << 8))
 
-#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <posix-file.h>
 #include "rpcx.h"
-
-struct RPCXState {
-	int			w;
-	int			h;
-	int			bpp;
-	int			planes;
-	int			valid;
-} state;
-
-
-static FILE *fp;
 
 
 static void _process_bits(struct RPCXInfo *ri, unsigned char data, int row, int col, int plane) {
-	int pixels = 8 / state.bpp;
+	int pixels = 8 / state->bpp;
 	int i, shift;
 	unsigned char mask;
 
-	shift = state.bpp;
+	shift = state->bpp;
 	mask = (0xFF << shift) ^ 0xFF;
 
 	for (i = 0; i < pixels; i++)
 		if (col * pixels + i < ri->w)
-			ri->data[state.w * row + col * pixels + i] |= ((data >> (shift * (pixels - i - 1))) & mask) << (shift * plane);
+			ri->data[ri->w * row + col * pixels + i] |= ((data >> (shift * (pixels - i - 1))) & mask) << (shift * plane);
 }
 
 
-void rpcx_close() {
-	fclose(fp);
-
+int rpcx_close(RPCXInfo *ri) {
+	if (!ri->valid)
+		return -1;
+	
+	if (ri->fd < 0)
+		return -1;
+	
+	close(ri->fd);
+	ri->fd = -1;
 	return;
 }
 
 
-int rpcx_read(struct RPCXInfo *ri) {
+int rpcx_read(RPCXInfo *ri) {
 	int row, plane, px, pxpl, j;
 	unsigned char d;
 	
-	if (!state.valid)
-		return 0;
-
-	if (state.bpp == 8)
-		pxpl = state.w;
-	else if (state.bpp == 1) {
-		pxpl = state.w >> 3;
-		if (state.w & 7)
+	if (!ri->valid)
+		return -1;
+	
+	if (ri->fd < 0)
+		return -1;
+	
+	if (ri->bpp == 8)
+		pxpl = ri->w;
+	else if (ri->bpp == 1) {
+		pxpl = ri->w >> 3;
+		if (ri->w & 7)
 			pxpl++;
-	} else if (state.bpp == 2) {
-		pxpl = state.w >> 2;
-		if (state.w & 3)
+	} else if (ri->bpp == 2) {
+		pxpl = ri->w >> 2;
+		if (ri->w & 3)
 			pxpl++;
 	} else {
-		pxpl = state.w >> 1;
-		if (state.w & 1)
+		pxpl = ri->w >> 1;
+		if (ri->w & 1)
 			pxpl++;
 	}
 
 
 	for (row = 0; row < ri->h; row++) 
-		for (plane = 0; plane < state.planes; plane++) 
+		for (plane = 0; plane < ri->planes; plane++) 
 			for (px = 0; px < pxpl;) {
-				fread(&d, 1, 1, fp);
+				read(fd, &d, 1);
 				if ((d & 0xC0) == 0xC0) {
 					j = (d & 0x3F);
-					fread(&d, 1, 1, fp);
+					read(fd, &d, 1);
 				} else
 					j = 1;
 
@@ -99,30 +99,35 @@ int rpcx_read(struct RPCXInfo *ri) {
 					_process_bits(ri, d, row, px++, plane);
 			}
 
-	fread(ri->palette, 3, 256, fp);
+	read(ri->fd, ri->palette, 3*256);
 
-	return 1;
+	return 0;
 }
 
 
-int rpcx_init(const char *fname, struct RPCXInfo *ri) {
+RPCXInfo *rpcx_init(const char *fname) {
+	RPCXInfo *ri = NULL;
 	unsigned char data[128];
 	signed short xmin, ymin, xmax, ymax;
-
-	state.valid = 0;
+	uint8_t *d = NULL;
+	
+	if(!(ri = malloc(sizeof(RPCXData))))
+		goto fail;
+	
+	state.valid = false;
 	ri->w = ri->h = 0;
 	
-	if (!(fp = fopen(fname, "rb")))
-		return 0;
+	if ((ri->fd = open(fname, O_RDONLY)) < 0)
+		goto fail;
 	
-	fread(data, 1, 128, fp);
+	read(ri->fd, data, 128);
 	
 	if (data[0] != 0xA)
-		return 0;
+		goto fail;
 	if (data[2] != 1)
-		return 0;
-	state.bpp = data[3];
-	state.planes = data[65];
+		goto fail;
+	ri->bpp = data[3];
+	ri->planes = data[65];
 	xmin = LE_TO_WORD(data, 4);
 	ymin = LE_TO_WORD(data, 6);
 	xmax = LE_TO_WORD(data, 8);
@@ -131,19 +136,32 @@ int rpcx_init(const char *fname, struct RPCXInfo *ri) {
 	xmax++;
 	ymax++;
 
-	state.w = xmax - xmin;
-	state.h = ymax - ymin;
+	ri->w = xmax - xmin;
+	ri->h = ymax - ymin;
 
-	if (state.planes != 1 && state.bpp != 1)
-		return 0;
+	if (ri->planes != 1 && ri->bpp != 1)
+		goto fail;
 	
-	state.valid = 1;
-	ri->w = state.w;
-	ri->h = state.h;
+	state.valid = true;
+	//ri->w = state.w;
+	//ri->h = state.h;
 	memcpy(ri->palette, data + 16, 48);
 	
-	printf("%i x %i, %i planes, %i bits per pixel\n", state.w, state.h, state.planes, state.bpp);
-	return 1;
+	//printf("%i x %i, %i planes, %i bits per pixel\n", state.w, state.h, state.planes, state.bpp);
+	
+	if(!(d = malloc(ri->w * ri->h)))
+		goto fail;
+	
+	ri->data = d;
+	
+	memset(ri->data, 0, ri->w * ri->h);
+	
+	return ri;
+	
+	fail:
+	free(ri);
+	free(d);
+	return NULL;
 }
 
 
