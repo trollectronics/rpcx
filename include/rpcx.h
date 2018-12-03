@@ -18,11 +18,11 @@ struct RPCXInfo {
 	int		w;
 	int		h;
 
-	unsigned char	*data;
+	uint8_t	*data;
 };
 
 RPCXInfo *rpcx_init(const char *fname);
 int rpcx_read(RPCXInfo *ri);
-int rpcx_close(RPCXInfo *ri)
+int rpcx_close(RPCXInfo *ri);
 
 #endif

@@ -32,11 +32,11 @@ freely, subject to the following restrictions:
 
 
 static void _process_bits(struct RPCXInfo *ri, unsigned char data, int row, int col, int plane) {
-	int pixels = 8 / state->bpp;
+	int pixels = 8 / ri->bpp;
 	int i, shift;
 	unsigned char mask;
 
-	shift = state->bpp;
+	shift = ri->bpp;
 	mask = (0xFF << shift) ^ 0xFF;
 
 	for (i = 0; i < pixels; i++)
@@ -46,6 +46,9 @@ static void _process_bits(struct RPCXInfo *ri, unsigned char data, int row, int 
 
 
 int rpcx_close(RPCXInfo *ri) {
+	if(!ri)
+		return 0;
+	
 	if (!ri->valid)
 		return -1;
 	
@@ -54,7 +57,8 @@ int rpcx_close(RPCXInfo *ri) {
 	
 	close(ri->fd);
 	ri->fd = -1;
-	return;
+	
+	return 0;
 }
 
 
@@ -88,10 +92,10 @@ int rpcx_read(RPCXInfo *ri) {
 	for (row = 0; row < ri->h; row++) 
 		for (plane = 0; plane < ri->planes; plane++) 
 			for (px = 0; px < pxpl;) {
-				read(fd, &d, 1);
+				read(ri->fd, &d, 1);
 				if ((d & 0xC0) == 0xC0) {
 					j = (d & 0x3F);
-					read(fd, &d, 1);
+					read(ri->fd, &d, 1);
 				} else
 					j = 1;
 
@@ -111,10 +115,10 @@ RPCXInfo *rpcx_init(const char *fname) {
 	signed short xmin, ymin, xmax, ymax;
 	uint8_t *d = NULL;
 	
-	if(!(ri = malloc(sizeof(RPCXData))))
+	if(!(ri = malloc(sizeof(RPCXInfo))))
 		goto fail;
 	
-	state.valid = false;
+	ri->valid = false;
 	ri->w = ri->h = 0;
 	
 	if ((ri->fd = open(fname, O_RDONLY)) < 0)
@@ -142,7 +146,7 @@ RPCXInfo *rpcx_init(const char *fname) {
 	if (ri->planes != 1 && ri->bpp != 1)
 		goto fail;
 	
-	state.valid = true;
+	ri->valid = true;
 	//ri->w = state.w;
 	//ri->h = state.h;
 	memcpy(ri->palette, data + 16, 48);
